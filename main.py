@@ -26,8 +26,8 @@ class CustomListWidget(QListWidget):
         if parent_scroll_area:
             # 새 휠 이벤트를 생성하여 부모로 전달
             new_event = QWheelEvent(event.pos(), event.globalPos(), event.pixelDelta(),
-                                    event.angleDelta(), event.buttons(), event.modifiers(),
-                                    event.phase(), event.inverted(), event.source())
+                                     event.angleDelta(), event.buttons(), event.modifiers(),
+                                     event.phase(), event.inverted(), event.source())
             QApplication.sendEvent(parent_scroll_area, new_event)
         else:
             super().wheelEvent(event)
@@ -48,7 +48,12 @@ class ItemEditor(QWidget):
         self.check_and_suggest_corrections()
 
         self.items = self.load_items()
-        self.current_type = "무기"
+        
+        # current_type 초기값을 config에서 가져오도록 수정
+        # config에 '공통' 외에 다른 키가 있다면 첫 번째 키를 기본값으로 사용
+        # config가 비어있거나 '공통'만 있다면 기본값 '무기' 사용
+        self.current_type = next((name for name in self.config.keys() if name != "공통"), "무기")
+        
         self.is_dark_mode = True
 
         self.init_ui()
@@ -98,6 +103,15 @@ class ItemEditor(QWidget):
     "방어력": {
       "tooltip": "방어구의 기본 방어력입니다."
     }
+  },
+  "장신구": {
+    "장신구 종류": {
+      "options": ["반지", "목걸이", "귀걸이"],
+      "tooltip": "장신구의 종류를 선택합니다."
+    },
+    "효과": {
+      "tooltip": "장신구의 특별한 효과입니다."
+    }
   }
 }
 """)
@@ -127,7 +141,7 @@ class ItemEditor(QWidget):
 
             # 사용자 친화적인 설명 추가
             error_intro = f"'{CONFIG_FILE}' 파일의 형식이 잘못되었습니다.\n" \
-                          "JSON 형식은 중괄호 `{{ }}`, 대괄호 `[ ]`, 쉼표 `,` 등의 규칙이 매우 중요합니다.\n\n" \
+                          "JSON 형식은 중괄호 `{}`, 대괄호 `[]`, 쉼표 `,` 등의 규칙이 매우 중요합니다.\n\n" \
                           "오타나 빠진 쉼표가 있는지 확인해주세요."
 
             # 오류 위치 정보 추가
@@ -235,17 +249,29 @@ class ItemEditor(QWidget):
         main_layout.addWidget(self.theme_toggle_btn, alignment=Qt.AlignRight)
 
         self.tabs = QTabWidget()
-        # config가 유효할 때만 탭 이름 설정
+        self.tabs.clear() # 기존 탭들을 모두 지움
+
+        # config에서 "공통"을 제외한 모든 키를 탭 이름으로 추가
         if self.config:
             tab_names = [name for name in self.config.keys() if name != "공통"]
-            self.tabs.clear()
             for name in tab_names:
                 self.tabs.addTab(QWidget(), name)
-            if tab_names:
+            if tab_names and self.current_type in tab_names:
+                # 현재 타입으로 탭을 설정 (초기화 또는 변경된 경우 대비)
+                self.tabs.setCurrentIndex(tab_names.index(self.current_type))
+            elif tab_names:
+                # current_type이 유효하지 않으면 첫 번째 탭으로 설정
                 self.current_type = tab_names[0]
+                self.tabs.setCurrentIndex(0)
+            else:
+                # config에 "공통" 외에 아무것도 없다면 기본 "무기" 탭 추가
+                self.tabs.addTab(QWidget(), "무기")
+                self.current_type = "무기"
         else:
+            # config 로드 실패 시 기본 탭 추가 (이 경우 sys.exit(1)로 프로그램이 종료될 것이므로 거의 실행되지 않음)
             self.tabs.addTab(QWidget(), "무기")
             self.tabs.addTab(QWidget(), "방어구")
+            self.current_type = "무기"
 
 
         self.tabs.currentChanged.connect(self.on_tab_changed)
@@ -555,7 +581,8 @@ class ItemEditor(QWidget):
             if "input" in w_dict:
                 w_dict["input"].clear()
             if "combobox" in w_dict:
-                w_dict["combobox"].setCurrentIndex(0)
+                # 콤보박스가 있다면 첫 번째 항목으로 설정
+                w_dict["combobox"].setCurrentIndex(0) 
         self.selected_index = None
         self.item_list.clearSelection()
         self.detail_text.clear()
