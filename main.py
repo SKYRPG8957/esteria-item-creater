@@ -50,8 +50,6 @@ class ItemEditor(QWidget):
         self.items = self.load_items()
         
         # current_type 초기값을 config에서 가져오도록 수정
-        # config에 '공통' 외에 다른 키가 있다면 첫 번째 키를 기본값으로 사용
-        # config가 비어있거나 '공통'만 있다면 기본값 '무기' 사용
         self.current_type = next((name for name in self.config.keys() if name != "공통"), "무기")
         
         self.is_dark_mode = True
@@ -84,6 +82,9 @@ class ItemEditor(QWidget):
     "등급": {
       "options": ["일반", "고급", "희귀", "영웅", "전설"],
       "tooltip": "아이템의 등급을 선택합니다."
+    },
+    "설명": {
+      "tooltip": "아이템에 대한 상세 설명을 입력하세요."
     }
   },
   "무기": {
@@ -446,8 +447,10 @@ class ItemEditor(QWidget):
             merged.update(self.config.get(self.current_type, {}))
 
         self.widgets = {}
-        for key, data in merged.items():
-            if key == "타입": continue
+        # config에 정의된 순서대로 폼 필드를 생성
+        # '공통' 필드들은 config.json에 정의된 순서대로 먼저 추가
+        for key, data in self.config.get("공통", {}).items():
+            if key == "타입": continue # '타입' 필드는 폼에서 사용하지 않음
             container = QFrame()
             container_layout = QVBoxLayout(container)
             container_layout.setContentsMargins(0, 0, 0, 0)
@@ -460,13 +463,11 @@ class ItemEditor(QWidget):
             options = data.get("options", [])
 
             if options:
-                # ComboBox for predefined options
                 combo = QComboBox()
                 combo.addItems(options)
                 combo.setToolTip(data.get("tooltip", ""))
                 container_layout.addWidget(combo)
                 
-                # Direct input field
                 edit = QLineEdit()
                 edit.setPlaceholderText(f"직접 입력 (선택 사항)")
                 edit.setToolTip(data.get("tooltip", ""))
@@ -474,26 +475,73 @@ class ItemEditor(QWidget):
 
                 self.widgets[key] = {"combobox": combo, "input": edit}
             else:
-                # Only input field
                 edit = QLineEdit()
-                edit.setPlaceholderText(f"{key} 입력")
+                # '설명' 필드는 QTextEdit으로 변경하여 여러 줄 입력 가능하게 함
+                if key == "설명":
+                    edit = QTextEdit() 
+                    edit.setPlaceholderText(f"{key}을(를) 입력하세요.")
+                    edit.setMinimumHeight(80) # 설명 필드 높이 증가
+                else:
+                    edit.setPlaceholderText(f"{key}을(를) 입력하세요.")
                 edit.setToolTip(data.get("tooltip", ""))
                 container_layout.addWidget(edit)
                 self.widgets[key] = {"input": edit}
             
             self.form_layout.addWidget(container)
+        
+        # 현재 타입에 해당하는 필드들을 config.json에 정의된 순서대로 추가
+        for key, data in self.config.get(self.current_type, {}).items():
+            if key == "타입" or key in self.config.get("공통", {}): continue # '타입' 중복 방지, '공통' 필드는 이미 추가됨
+            container = QFrame()
+            container_layout = QVBoxLayout(container)
+            container_layout.setContentsMargins(0, 0, 0, 0)
+            container_layout.setSpacing(4)
+            label = QLabel(f"{key}:")
+            label.setToolTip(data.get("tooltip", ""))
+            label.setStyleSheet("font-weight: bold; margin-bottom: 2px;")
+            container_layout.addWidget(label)
+            
+            options = data.get("options", [])
+
+            if options:
+                combo = QComboBox()
+                combo.addItems(options)
+                combo.setToolTip(data.get("tooltip", ""))
+                container_layout.addWidget(combo)
+                
+                edit = QLineEdit()
+                edit.setPlaceholderText(f"직접 입력 (선택 사항)")
+                edit.setToolTip(data.get("tooltip", ""))
+                container_layout.addWidget(edit)
+
+                self.widgets[key] = {"combobox": combo, "input": edit}
+            else:
+                edit = QLineEdit()
+                edit.setPlaceholderText(f"{key}을(를) 입력하세요.")
+                edit.setToolTip(data.get("tooltip", ""))
+                container_layout.addWidget(edit)
+                self.widgets[key] = {"input": edit}
+            
+            self.form_layout.addWidget(container)
+
         self.form_layout.addStretch(1)
 
     def get_form_data(self):
         """폼에서 현재 입력된 데이터를 가져옵니다."""
         data = {"타입": self.current_type}
         for key, w_dict in self.widgets.items():
-            # 직접 입력 필드가 존재하고, 그곳에 값이 있다면 우선적으로 사용
-            if "input" in w_dict:
+            val = ""
+            # QTextEdit일 경우 text() 대신 toPlainText() 사용
+            if isinstance(w_dict["input"], QTextEdit):
+                val = w_dict["input"].toPlainText().strip()
+            # QLineEdit일 경우 text() 사용
+            elif "input" in w_dict:
                 val = w_dict["input"].text().strip()
-                if val:
-                    data[key] = val
-                    continue  # 직접 입력 값을 사용했으므로 다음 키로 넘어감
+            
+            # 직접 입력 필드가 존재하고, 그곳에 값이 있다면 우선적으로 사용
+            if val:
+                data[key] = val
+                continue  # 직접 입력 값을 사용했으므로 다음 키로 넘어감
 
             # 직접 입력 값이 없을 경우, 콤보박스 값 사용
             if "combobox" in w_dict:
@@ -531,9 +579,12 @@ class ItemEditor(QWidget):
                     edit.setText(val_str)
                     combo.setCurrentIndex(-1) # 콤보박스 선택 해제
             
-            # 입력 필드만 있는 경우
+            # 입력 필드만 있는 경우 (QTextEdit 포함)
             elif "input" in w_dict:
-                w_dict["input"].setText(val_str)
+                if isinstance(w_dict["input"], QTextEdit):
+                    w_dict["input"].setPlainText(val_str)
+                else:
+                    w_dict["input"].setText(val_str)
 
     def add_item(self):
         data = self.get_form_data()
@@ -579,7 +630,11 @@ class ItemEditor(QWidget):
     def clear_form_fields(self):
         for w_dict in self.widgets.values():
             if "input" in w_dict:
-                w_dict["input"].clear()
+                # QTextEdit인 경우 clear() 대신 setPlainText("") 사용
+                if isinstance(w_dict["input"], QTextEdit):
+                    w_dict["input"].setPlainText("")
+                else:
+                    w_dict["input"].clear()
             if "combobox" in w_dict:
                 # 콤보박스가 있다면 첫 번째 항목으로 설정
                 w_dict["combobox"].setCurrentIndex(0) 
@@ -592,7 +647,41 @@ class ItemEditor(QWidget):
         self.selected_index = idx
         data = self.items[idx]
         self.fill_form(data)
-        lines = [f"<b>{k}</b>: {', '.join(v) if isinstance(v, list) else v}" for k, v in data.items() if k != "타입"]
+
+        # '설명' 필드를 마지막에 정렬하기 위한 로직 추가
+        display_keys_order = []
+        
+        # 1. '공통' 필드들을 우선적으로 추가 (설명 제외)
+        common_keys_in_config = list(self.config.get("공통", {}).keys())
+        for key in common_keys_in_config:
+            if key != "설명":
+                display_keys_order.append(key)
+
+        # 2. 현재 아이템 타입의 필드들을 추가 (config에 정의된 순서대로, 중복 방지)
+        type_keys_in_config = list(self.config.get(self.current_type, {}).keys())
+        for key in type_keys_in_config:
+            if key not in display_keys_order:
+                display_keys_order.append(key)
+
+        # 3. '설명' 필드가 있다면 가장 마지막에 추가
+        if "설명" in self.config.get("공통", {}):
+            display_keys_order.append("설명")
+
+        # 4. 아이템 데이터에서 표시할 줄 생성
+        lines = []
+        # config에 정의된 순서대로 정보 표시
+        for key in display_keys_order:
+            if key in data:
+                value = data[key]
+                formatted_value = ', '.join(value) if isinstance(value, list) else str(value)
+                lines.append(f"<b>{key}</b>: {formatted_value}")
+        
+        # config에 정의되지 않았지만 아이템 데이터에 있는 다른 필드들을 추가 (예상치 못한 필드)
+        for key, value in data.items():
+            if key not in display_keys_order and key != "타입":
+                formatted_value = ', '.join(value) if isinstance(value, list) else str(value)
+                lines.append(f"<b>{key}</b>: {formatted_value}")
+
         self.detail_text.setHtml("<br>".join(lines))
 
     def delete_selected_item(self):
@@ -622,8 +711,14 @@ class ItemEditor(QWidget):
         if self.selected_index is None: return
         item = self.items[self.selected_index]
         lines = [f"{k}: {', '.join(v) if isinstance(v, list) else v}" for k, v in item.items() if k != "타입"]
+        # '설명' 필드가 있다면 마지막에 추가하여 복사본에도 순서 반영
+        if "설명" in item:
+            description_text = item["설명"].replace("\n", "\\n") # 줄바꿈 문자를 이스케이프
+            lines.remove(f"설명: {description_text}") # 원래 위치에서 제거
+            lines.append(f"설명: {description_text}") # 마지막에 다시 추가
         self.copy_to_clipboard("\n".join(lines))
         self.status_message("선택 아이템 일반 텍스트 복사 완료")
+
 
     def copy_latest_item(self):
         if not self.items: return
